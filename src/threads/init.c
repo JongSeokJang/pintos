@@ -81,9 +81,12 @@ main (void)
   /* Clear BSS. */  
   bss_init ();		
 
+
   /* Break command line into arguments and parse options. */
   argv = read_command_line ();
   argv = parse_options (argv);
+
+  printf("JJS hihi1\n");
 
   /* Initialize ourselves as a thread so we can use locks,
      then enable console locking. */
@@ -130,7 +133,10 @@ main (void)
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */
+  
+  printf("JJS before : run_actions \n");
   run_actions (argv);
+  printf("JJS aftr : run_actions \n");
 
   /* Finish up. */
   shutdown ();
@@ -304,6 +310,7 @@ run_actions (char **argv)
       int argc;                         /* # of args, including action name. */
       void (*function) (char **argv);   /* Function to execute action. */
     };
+  printf("JJS in : run_actions \n");
 
   /* Table of supported actions. */
   static const struct action actions[] = 

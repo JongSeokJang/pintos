@@ -20,6 +20,8 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+int parse_filename(char* file_name, char** argv,int argc);
+void construct_ESP(void** esp_origin, char** argv, int argc);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -31,6 +33,9 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
+  printf("JJS : In process_execute\n");
+  printf("JJS : [%s]\n", file_name);
+  
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -54,6 +59,8 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  printf("JJS : In start_process\n");
+  printf("JJS : [%s]\n", file_name);
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -216,17 +223,28 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
+  char *program_name;
+  char *ret_ptr, *next_ptr;
+  char *argv[128+1];
+  int	argc = 0;
+  
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
 
+  //argc = parse_filename((char*)file_name,argv,argc); // parsing name
+  /* parse program_name from file_name */
+  ret_ptr = strtok_r(file_name, " ", next_ptr);
+  program_name = ret_ptr;
+
   /* Open executable file. */
-  file = filesys_open (file_name);
+  //file = filesys_open (file_name);
+  file = filesys_open (program_name);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", program_name);
       goto done; 
     }
 
@@ -305,6 +323,56 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
+
+  /* construct_ESP(esp) */
+  memset(argv, 0x00, sizeof(argv));
+  argc = 0;
+
+  while ( ret_ptr ){
+	
+	argv[argc++] = ret_ptr;	
+	ret_ptr = strtok_r(NULL, " ", next_ptr);
+  }
+  argv[argc] = NULL;
+
+  for ( i = argc-1; i >= 0; i-- ){
+
+	(*esp)--;
+	**((uint8_t**)esp) = 0;
+	(*esp) -= strlen(argv[i]);
+	memcpy( *esp, argv[i], strlen(argv[i]) );
+  }
+
+  while ( (uintptr_t)(*esp) % 4 != 0 ){
+
+	(*esp)--;
+	**((uint8_t**)esp) = 0;
+  }
+
+  // insert argvs
+
+  for ( i = argc ; i >= 0 ; i-- ){
+	
+	(*esp) -= sizeof(char*);
+	**((char**)esp) = argv[i];
+  }
+
+  // insert argv
+  (*esp) -= sizeof(char**);
+  **((char**)esp) = (*esp) + sizeof(char**);
+
+  // insert argc
+  (*esp) -= sizeof(int);
+  **((int**)esp) = argc;
+  
+  (*esp) -= sizeof(unsigned int);
+  memset( *esp ,0x00, sizeof(unsigned int) ) ;
+
+
+  //construct_ESP(esp,argv,argc);
+  // use hex_dump() for debugging 
+  hex_dump((int)(*esp),*esp,(unsigned int)PHYS_BASE - (unsigned int)(*esp),true);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -463,4 +531,51 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (th->pagedir, upage) == NULL
           && pagedir_set_page (th->pagedir, upage, kpage, writable));
+}
+
+int parse_filename(char* file_name, char** argv, int argc){
+    char * ptrptr;
+    argv[argc] = strtok_r(file_name," ",&ptrptr);
+    while(argv[argc] != NULL){
+        //printf("%s\n",argv[argc]);
+        argc++;
+        argv[argc] = strtok_r(NULL," ",&ptrptr);
+    }
+
+    return argc;
+}
+
+void construct_ESP(void** esp_origin, char** argv,int argc){
+    int i,len;
+    unsigned char ** esp = (unsigned char **) esp_origin;
+
+    for(i=argc-1;i>=0;i--){
+        len = strlen(argv[i]);
+        (*esp)--;
+        (**esp) = '\0';
+        (*esp) -= len;
+        memcpy(*esp,argv[i],len);
+        argv[i] = (char *)(*esp);
+    }
+
+    while((unsigned int) (*esp) %4 != 0){
+        (*esp) -- ;
+        (**esp) = '\0';
+    }
+
+    (*esp) -= 4;
+    memset(*esp,'\0',sizeof(unsigned int));
+/*
+    for(i=argc-1;i>=0;i--){
+        (*esp) -= 4;
+        (*(unsigned int *) *esp) = (unsigned int)argv[i];
+    }
+
+    (*esp) -= 4;
+    (*(unsigned int *)*esp) = ((unsigned int)(*esp)) + 4;
+    (*esp) -= 4;
+    (*(unsigned int *)*esp) = argc;
+    (*esp)-=4;
+    memset(*esp,'\0',sizeof(unsigned int));
+*/
 }
