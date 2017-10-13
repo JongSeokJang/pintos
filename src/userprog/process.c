@@ -33,8 +33,6 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  printf("JJS : In process_execute\n");
-  printf("JJS : [%s]\n", file_name);
   
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -59,8 +57,6 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
-  printf("JJS : In start_process\n");
-  printf("JJS : [%s]\n", file_name);
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -95,8 +91,9 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  while(1);
+  while(1); 
   return -1;
+
 }
 
 /* Free the current process's resources. */
@@ -109,6 +106,7 @@ process_exit (void)
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
+
   if (pd != NULL) 
     {
       /* Correct ordering here is crucial.  We must set
@@ -239,6 +237,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   ret_ptr = strtok_r(file_name, " ", next_ptr);
   program_name = ret_ptr;
 
+  while ( ret_ptr ){
+
+	argv[argc++] = ret_ptr;
+	ret_ptr = strtok_r(NULL, " ", next_ptr);
+  }
+  argv[argc] = NULL;
+
   /* Open executable file. */
   //file = filesys_open (file_name);
   file = filesys_open (program_name);
@@ -324,51 +329,41 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
-
   /* construct_ESP(esp) */
-  memset(argv, 0x00, sizeof(argv));
-  argc = 0;
+  
+  for( i = argc-1; i >= 0; i--){
 
-  while ( ret_ptr ){
-	
-	argv[argc++] = ret_ptr;	
-	ret_ptr = strtok_r(NULL, " ", next_ptr);
-  }
-  argv[argc] = NULL;
-
-  for ( i = argc-1; i >= 0; i-- ){
-
-	(*esp)--;
-	**((uint8_t**)esp) = 0;
-	(*esp) -= strlen(argv[i]);
-	memcpy( *esp, argv[i], strlen(argv[i]) );
-  }
+	(*esp) -= (strlen(argv[i])+1);
+	strlcpy( (*esp), argv[i], strlen(argv[i])+1 );
+	argv[i] = (char*)(*esp); // insert '\0'
+	 
+  } 
 
   while ( (uintptr_t)(*esp) % 4 != 0 ){
 
-	(*esp)--;
-	**((uint8_t**)esp) = 0;
+    (*esp)--;
+    **((uint8_t**)esp) = 0;
   }
 
-  // insert argvs
-
   for ( i = argc ; i >= 0 ; i-- ){
-	
-	(*esp) -= sizeof(char*);
-	**((char**)esp) = argv[i];
+    
+    (*esp) -= sizeof(char*);
+	//**(char**)esp = argv[i];  // why not working ??
+	**(unsigned int **)esp = (unsigned int)argv[i];
   }
 
   // insert argv
   (*esp) -= sizeof(char**);
-  **((char**)esp) = (*esp) + sizeof(char**);
+  //**((char**)esp) = (*esp) + sizeof(char**);  // why not working??
+  **(unsigned int**)esp = (unsigned int)(*esp) + sizeof(char**);
 
   // insert argc
   (*esp) -= sizeof(int);
-  **((int**)esp) = argc;
-  
+  **((unsigned int**)esp) = argc;
+
+ 
   (*esp) -= sizeof(unsigned int);
   memset( *esp ,0x00, sizeof(unsigned int) ) ;
-
 
   //construct_ESP(esp,argv,argc);
   // use hex_dump() for debugging 

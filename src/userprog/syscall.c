@@ -3,21 +3,10 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
-
-#define LOADER_PHYS_BASE 0xc0000000     /* 3 GB. */
-#define	PHYS_BASE ((void *) LOADER_PHYS_BASE)
+#include "threads/vaddr.h"
 
 static void syscall_handler (struct intr_frame *);
-void* get_arg(void *ptr);
-
-/*
-void
-check_ptr_validity(void *ptr)
-{
-  if(!(ptr>0x08048000 && ptr< PHYS_BASE )) exit(-1);
-}
-*/
-
+void * get_arg (void *ptr );
 
 void
 syscall_init (void) 
@@ -31,6 +20,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   int syscall_num = (int)get_arg(f->esp);
 
   //int syscall_num = *(int*)(f->esp);
+  //hex_dump((int)f->esp,f->esp,0xff,true);
   printf ("system call! [%d]\n", syscall_num);
 
   switch(syscall_num){
@@ -38,7 +28,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 	  halt();
 	  break;
 	case SYS_EXIT:
-	  exit((int)get_arg(f->esp+4));
+	  exit( (int)get_arg(f->esp+4) );
 	  break;
 	case SYS_EXEC:
 	  f->eax = (uint32_t) exec((char *) get_arg(f->esp+4));
@@ -47,10 +37,14 @@ syscall_handler (struct intr_frame *f UNUSED)
 	  f->eax = (uint32_t) process_wait((int)get_arg(f->esp+4));
 	  break;
 	case SYS_READ:
-	  f->eax = read((int)get_arg(f->esp+4), (void *)get_arg(f->esp+8), (unsigned int)get_arg(f->esp+12));
+	  f->eax = read(	(int) get_arg(f->esp + 16 + 4*1), 
+						(void *) get_arg(f->esp + 16 + 4*2), 
+						(unsigned int) get_arg(f->esp + 16 + 4*3));
 	  break;
 	case SYS_WRITE:
-	  f->eax = write((int)get_arg(f->esp+4), (void *)get_arg(f->esp+8), (unsigned int)get_arg(f->esp+12));
+	  f->eax = write(	(int)get_arg(f->esp + 16 + 4*1), 
+						(void *)get_arg(f->esp + 16 + 4*2), 
+						(unsigned int)get_arg(f->esp + 16 + 4*3));
 	  break;
 	case SYS_FIBO:
 	  break;
@@ -74,6 +68,11 @@ halt (void)
 void  
 exit (int status)
 {
+  struct thread *cthread = thread_current();
+  cthread->exit_status = status;
+
+  printf("%s: exit(%d)\n", cthread->name, cthread->exit_status); 
+  thread_exit();
 
 }
 
@@ -89,14 +88,44 @@ wait (pid_t pid)
   return process_wait(pid);
 }
 
+int
 read (int fd, void *buffer, unsigned size)
 {
-  
+  unsigned int i;
+  char temp;
+
+  if ( fd == 0 ){
+
+	for ( i = 0; i< size; i++){
+	  temp = input_getc();
+	  *((char*)(buffer+i)) = temp;
+
+	  if ( temp == '\0' || temp == '\n'){
+
+		*((char*)(buffer+i)) = '\0';
+		break;		  
+	  }
+	}	
+	return i;
+  }  
+  else{
+
+	return -1;
+  }
 }
 
 int 
 write (int fd, const void *buffer, unsigned size)
 {
+
+  if( fd == 1 ){
+	putbuf(buffer, size);
+	return size;
+  }
+  else{
+	return size;
+  }
+
 }
 
 int 
@@ -125,14 +154,21 @@ sum_of_four_integers (int a, int b, int c, int d)
   return a+b+c+d;
 }
 
+void
+check_ptr_validity(void *ptr)
+{
+  if( ptr < 0x08048000 || ptr >= PHYS_BASE )
+	exit(-1);
+}
+
 void *
 get_arg(void *ptr)
 {
-  void *temp;
+  void *arg;
 
-  //check_ptr_validity(ptr);
-  memcpy(&temp, ptr, 4);
-  return  temp;
+  check_ptr_validity(ptr+3);
+  memcpy(&arg, ptr, 4);
+  return  arg;
 
 }
 
