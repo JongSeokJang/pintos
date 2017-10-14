@@ -20,8 +20,6 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-int parse_filename(char* file_name, char** argv,int argc);
-void construct_ESP(void** esp_origin, char** argv, int argc);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -33,13 +31,29 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  
+  int ii;
+  char program_name[16+1];
+  struct file *file_ds;
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  if (fn_copy == NULL) 
     return TID_ERROR;
+
   strlcpy (fn_copy, file_name, PGSIZE);
+
+  for( ii = 0; ii < strlen(file_name); ii++){
+	if( file_name[ii] == ' ' || file_name[ii] == '\0' ){
+	  break;
+	}
+	program_name[ii] = file_name[ii];
+  }
+  program_name[ii] = '\0';
+
+  file_ds = filesys_open(program_name);
+  if ( file_ds == NULL )
+	return -1;
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -91,8 +105,39 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  while(1); 
-  return -1;
+  struct thread *parent = thread_current ();
+  struct thread *child = NULL;
+  struct thread *temp;
+  struct list_elem *e;
+  int exit_status; 
+
+  if( child_tid < 0 )
+	return -1;
+
+  for(	e = list_begin(&parent->child); 
+		e != list_end(&parent->child); 
+		e = list_next(e) ){
+
+	temp = list_entry(e, struct thread, child_elem);
+	if( temp->tid == child_tid ){
+	  child = temp;
+	  break;
+	}
+  }
+
+  if( child == NULL )
+	return -1;
+
+
+  sema_down(&child->sema_wait); 
+  while( parent->status == THREAD_BLOCKED );
+  exit_status = child->exit_status;
+
+  if( exit_status == 0 && child->already_wait == 0 )
+	return -1;
+
+  child->already_wait = 0;
+  return exit_status;
 
 }
 
@@ -100,12 +145,17 @@ process_wait (tid_t child_tid UNUSED)
 void
 process_exit (void)
 {
+
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
+
+#ifdef USERPROG
+    sema_up(&cur->sema_wait); // unblock for parent thread
+#endif
 
   if (pd != NULL) 
     {
@@ -120,6 +170,11 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+/* test code JJS */
+    list_remove(&(cur->child_elem)); // remove child_elem from parent->child list
+    intr_disable();
+    thread_block(); // block child thread
+    intr_enable();
 }
 
 /* Sets up the CPU for running user code in the current
@@ -232,11 +287,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  //argc = parse_filename((char*)file_name,argv,argc); // parsing name
   /* parse program_name from file_name */
   ret_ptr = strtok_r(file_name, " ", next_ptr);
   program_name = ret_ptr;
 
+  /* make argv, argc from argument */
   while ( ret_ptr ){
 
 	argv[argc++] = ret_ptr;
@@ -330,7 +385,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
 
   /* construct_ESP(esp) */
-  
+  // by JJS
   for( i = argc-1; i >= 0; i--){
 
 	(*esp) -= (strlen(argv[i])+1);
@@ -348,31 +403,26 @@ load (const char *file_name, void (**eip) (void), void **esp)
   for ( i = argc ; i >= 0 ; i-- ){
     
     (*esp) -= sizeof(char*);
-	//**(char**)esp = argv[i];  // why not working ??
 	**(unsigned int **)esp = (unsigned int)argv[i];
   }
 
   // insert argv
   (*esp) -= sizeof(char**);
-  //**((char**)esp) = (*esp) + sizeof(char**);  // why not working??
   **(unsigned int**)esp = (unsigned int)(*esp) + sizeof(char**);
 
   // insert argc
   (*esp) -= sizeof(int);
   **((unsigned int**)esp) = argc;
-
  
   (*esp) -= sizeof(unsigned int);
   memset( *esp ,0x00, sizeof(unsigned int) ) ;
 
-  //construct_ESP(esp,argv,argc);
-  // use hex_dump() for debugging 
-  hex_dump((int)(*esp),*esp,(unsigned int)PHYS_BASE - (unsigned int)(*esp),true);
-
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
-
   success = true;
+
+  /* use hex_dump() for debugging  */
+  //hex_dump((int)(*esp),*esp,(unsigned int)PHYS_BASE - (unsigned int)(*esp),true);
 
  done:
   /* We arrive here whether the load is successful or not. */
@@ -501,7 +551,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
@@ -526,51 +576,4 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (th->pagedir, upage) == NULL
           && pagedir_set_page (th->pagedir, upage, kpage, writable));
-}
-
-int parse_filename(char* file_name, char** argv, int argc){
-    char * ptrptr;
-    argv[argc] = strtok_r(file_name," ",&ptrptr);
-    while(argv[argc] != NULL){
-        //printf("%s\n",argv[argc]);
-        argc++;
-        argv[argc] = strtok_r(NULL," ",&ptrptr);
-    }
-
-    return argc;
-}
-
-void construct_ESP(void** esp_origin, char** argv,int argc){
-    int i,len;
-    unsigned char ** esp = (unsigned char **) esp_origin;
-
-    for(i=argc-1;i>=0;i--){
-        len = strlen(argv[i]);
-        (*esp)--;
-        (**esp) = '\0';
-        (*esp) -= len;
-        memcpy(*esp,argv[i],len);
-        argv[i] = (char *)(*esp);
-    }
-
-    while((unsigned int) (*esp) %4 != 0){
-        (*esp) -- ;
-        (**esp) = '\0';
-    }
-
-    (*esp) -= 4;
-    memset(*esp,'\0',sizeof(unsigned int));
-/*
-    for(i=argc-1;i>=0;i--){
-        (*esp) -= 4;
-        (*(unsigned int *) *esp) = (unsigned int)argv[i];
-    }
-
-    (*esp) -= 4;
-    (*(unsigned int *)*esp) = ((unsigned int)(*esp)) + 4;
-    (*esp) -= 4;
-    (*(unsigned int *)*esp) = argc;
-    (*esp)-=4;
-    memset(*esp,'\0',sizeof(unsigned int));
-*/
 }

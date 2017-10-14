@@ -1,11 +1,16 @@
-#include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "userprog/syscall.h"
+#include "userprog/process.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "devices/shutdown.h"
+#include "devices/input.h"
+
 
 static void syscall_handler (struct intr_frame *);
+void check_memory_valid(void *addr);
 void * get_arg (void *ptr );
 
 void
@@ -14,37 +19,61 @@ syscall_init (void)
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
+
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-  int syscall_num = (int)get_arg(f->esp);
 
-  //int syscall_num = *(int*)(f->esp);
-  //hex_dump((int)f->esp,f->esp,0xff,true);
-  printf ("system call! [%d]\n", syscall_num);
-
-  switch(syscall_num){
+  void *syscall_num = (f->esp);
+  void *arg1, *arg2, *arg3;
+  check_memory_valid(syscall_num+3);
+  
+  switch( *(int*)syscall_num ){
 	case SYS_HALT:
 	  halt();
 	  break;
 	case SYS_EXIT:
-	  exit( (int)get_arg(f->esp+4) );
+	  arg1 = f->esp + 4*1;
+	  check_memory_valid(arg1+3);
+
+	  // void exit(int status)
+	  exit( *(int *)arg1 ); 
+
 	  break;
 	case SYS_EXEC:
-	  f->eax = (uint32_t) exec((char *) get_arg(f->esp+4));
+	  arg1 = f->esp + 4*1;
+	  check_memory_valid(arg1+3);
+
+	  // pid_t exec(const char *cmd_line)
+	  f->eax = (uint32_t)exec( (char *)arg1 );
+
 	  break;
 	case SYS_WAIT:
-	  f->eax = (uint32_t) process_wait((int)get_arg(f->esp+4));
+	  arg1 = f->esp + 4*1;
+	  check_memory_valid(arg1+3);
+
+	  // int wait(pid_t pid)
+	  f->eax = (uint32_t)process_wait( *(int *)arg1 );
 	  break;
 	case SYS_READ:
-	  f->eax = read(	(int) get_arg(f->esp + 16 + 4*1), 
-						(void *) get_arg(f->esp + 16 + 4*2), 
-						(unsigned int) get_arg(f->esp + 16 + 4*3));
+	  arg1 = f->esp + 4*1;
+	  arg2 = f->esp + 4*2;
+	  arg3 = f->esp + 4*3;
+	  check_memory_valid(arg3+3);
+
+	  // int read(int fd, void *buffer, unsigned size)
+	  f->eax = read( *(int *)arg1, *(void **)arg2, *(unsigned int*)arg3 );
+
 	  break;
 	case SYS_WRITE:
-	  f->eax = write(	(int)get_arg(f->esp + 16 + 4*1), 
-						(void *)get_arg(f->esp + 16 + 4*2), 
-						(unsigned int)get_arg(f->esp + 16 + 4*3));
+	  arg1 = f->esp + 4*1;
+	  arg2 = f->esp + 4*2;
+	  arg3 = f->esp + 4*3;
+	  check_memory_valid(arg3+3);
+
+	  // int write(int fd, void *buffer, unsigned size)
+	  f->eax = write( *(int *)arg1, *(void **)arg2, *(unsigned int*)arg3 );
+
 	  break;
 	case SYS_FIBO:
 	  break;
@@ -53,10 +82,8 @@ syscall_handler (struct intr_frame *f UNUSED)
 
 	default:
 	  break;
-  
   }
 
-  thread_exit ();
 }
 
 void 
@@ -68,10 +95,23 @@ halt (void)
 void  
 exit (int status)
 {
+
   struct thread *cthread = thread_current();
   cthread->exit_status = status;
 
-  printf("%s: exit(%d)\n", cthread->name, cthread->exit_status); 
+  char cthread_name[16+1];
+  int ii = 0;
+  
+  memset(cthread_name, 0x00, sizeof(cthread_name));
+  for( ii = 0; ii< strlen(cthread->name); ii++ ){
+	if( cthread->name[ii] == '\0' || cthread->name[ii] == ' '){
+	  break;
+	}
+	cthread_name[ii] = cthread->name[ii];
+  }
+  cthread->name[ii] = '\0';
+
+  printf("%s: exit(%d)\n", cthread_name, cthread->exit_status); 
   thread_exit();
 
 }
@@ -91,7 +131,7 @@ wait (pid_t pid)
 int
 read (int fd, void *buffer, unsigned size)
 {
-  unsigned int i;
+  int i;
   char temp;
 
   if ( fd == 0 ){
@@ -101,7 +141,6 @@ read (int fd, void *buffer, unsigned size)
 	  *((char*)(buffer+i)) = temp;
 
 	  if ( temp == '\0' || temp == '\n'){
-
 		*((char*)(buffer+i)) = '\0';
 		break;		  
 	  }
@@ -109,7 +148,6 @@ read (int fd, void *buffer, unsigned size)
 	return i;
   }  
   else{
-
 	return -1;
   }
 }
@@ -117,15 +155,11 @@ read (int fd, void *buffer, unsigned size)
 int 
 write (int fd, const void *buffer, unsigned size)
 {
-
   if( fd == 1 ){
 	putbuf(buffer, size);
 	return size;
   }
-  else{
-	return size;
-  }
-
+  return -1;
 }
 
 int 
@@ -137,15 +171,13 @@ fibonacci (int n)
   if( n ==1 || n == 2 ){
 	return 1;
   }
-  else{
 
-	for( i = 3; i <= n; i++ ){
-	  temp = n1;
-	  n1 = n2;
-	  n2 = n1 + temp;
-	}
-	return n2;		
+  for( i = 3; i <= n; i++ ){
+	temp = n1;
+	n1 = n2;
+	n2 = n1 + temp;
   }
+  return n2;		
 }
 
 int 
@@ -155,21 +187,10 @@ sum_of_four_integers (int a, int b, int c, int d)
 }
 
 void
-check_ptr_validity(void *ptr)
+check_memory_valid(void *addr)
 {
-  if( ptr < 0x08048000 || ptr >= PHYS_BASE )
+  if( addr < 0x08048000 || addr >= PHYS_BASE ){
 	exit(-1);
+  }
 }
-
-void *
-get_arg(void *ptr)
-{
-  void *arg;
-
-  check_ptr_validity(ptr+3);
-  memcpy(&arg, ptr, 4);
-  return  arg;
-
-}
-
 

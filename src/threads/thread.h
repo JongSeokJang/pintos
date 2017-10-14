@@ -98,17 +98,17 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
 #endif
-
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
 
+	// JJS
 	/* For project#1 */
 	int exit_status;						/* Child thread's status after exit. */
     struct thread* parent;
 	struct list child;
 	struct list_elem child_elem;
 	struct semaphore sema_wait;
-	int allready_wait;	
+	int already_wait;	
 
   };
 

@@ -209,6 +209,34 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+// JJS
+/*
+  struct thread *p = thread_current();
+  
+  if( t == initial_thread )
+	t->parent = NULL;
+  else{
+	t->parent = p;
+    list_push_back(&(p->child),&(t->child_elem));
+  }
+  list_init(&(p->child));
+  sema_init(&t->sema_wait,0);
+  t->exit_status = 1;
+  t->already_wait = 1;
+*/
+
+// test code JJS
+#ifdef USERPROG
+    struct thread *p = thread_current();
+
+    t->parent = p;
+    list_init(&(p->child));
+    sema_init(&t->sema_wait,0);
+    list_push_back(&(p->child),&(t->child_elem));
+    t->exit_status = 1;
+    t->already_wait = 1;
+#endif
+
   return tid;
 }
 
@@ -470,6 +498,24 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
+
+  // JJS
+/*
+  struct thread *p = running_thread();
+
+  if( t == initial_thread ) 
+	t -> parent = NULL;
+  else{
+	t -> parent = p;
+	list_push_back( &p->child, &t->child_elem );
+  }
+
+  list_init(&(p->child));
+  sema_init(&t->sema_wait,0);
+  t->exit_status = 1;
+  t->already_wait = 1;
+*/
+
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

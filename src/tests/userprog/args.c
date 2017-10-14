@@ -11,7 +11,6 @@ main (int argc, char *argv[])
   int i;
 
   test_name = "args";
-
   msg ("begin");
   msg ("argc = %d", argc);
   for (i = 0; i <= argc; i++)
@@ -20,6 +19,5 @@ main (int argc, char *argv[])
     else
       msg ("argv[%d] = null", i);
   msg ("end");
-
   return 0;
 }
