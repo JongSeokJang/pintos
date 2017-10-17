@@ -144,6 +144,8 @@ page_fault (struct intr_frame *f)
   page_fault_cnt++;
 
   /* JJS */
+  if ( user == false )
+	exit(-1);
   //exit(-1);
 
   /* Determine cause. */

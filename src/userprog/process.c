@@ -20,6 +20,7 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+void parse_file_name(char *file_name, char **argv, int *argc);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -55,10 +56,12 @@ process_execute (const char *file_name)
   if ( file_ds == NULL )
 	return -1;
 
+  //printf("[JJS] process_execute 1\n");
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+  //printf("[JJS] process_execute 2\n");
   return tid;
 }
 
@@ -70,18 +73,25 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  //printf("[JJS] in start_process1 \n");
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+  //printf("[JJS] in start_process2 \n");
   success = load (file_name, &if_.eip, &if_.esp);
 
+  //printf("[JJS] in start_process3 success[%d]\n", (int)success);
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
+  if (!success){
+	//printf("[JJS] in start_process not success \n");
     thread_exit ();
+
+  }
+  //printf("[JJS] in start_process4 \n");
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -109,34 +119,40 @@ process_wait (tid_t child_tid UNUSED)
   struct thread *child = NULL;
   struct thread *temp;
   struct list_elem *e;
-  int exit_status; 
+  int flag = 0;
+  int exit_status = 0;
 
-  if( child_tid < 0 )
+  if( child_tid < 0 || parent == NULL)
 	return -1;
 
-  for(	e = list_begin(&parent->child); 
-		e != list_end(&parent->child); 
+  for(	e = list_begin(&parent->child_list); 
+		e != list_end(&parent->child_list); 
 		e = list_next(e) ){
 
 	temp = list_entry(e, struct thread, child_elem);
 	if( temp->tid == child_tid ){
 	  child = temp;
+	  flag = 1;
 	  break;
 	}
   }
-
-  if( child == NULL )
+  
+  if ( flag == 0 || child == NULL)
 	return -1;
 
+//  printf("[JJS] in process_wait name:[%s] status:[%d] 1\n", child->name,child->exit_status);
 
-  sema_down(&child->sema_wait); 
-  while( parent->status == THREAD_BLOCKED );
+  parent->wait_flag = true;
+  child->pwait_flag = true;
+  sema_down(&child->sema);  // parent block
+
+  //printf("[JJS] in process_wait name:[%s] status:[%d] 1\n", child->name,child->exit_status);
+
+  //if ( parent->wait_flag == true)
+  // return -1;
   exit_status = child->exit_status;
 
-  if( exit_status == 0 && child->already_wait == 0 )
-	return -1;
-
-  child->already_wait = 0;
+  sema_up(&child->die_sema);
   return exit_status;
 
 }
@@ -146,6 +162,7 @@ void
 process_exit (void)
 {
 
+  //printf("[JJS] in process_exit 1\n");
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
@@ -153,10 +170,7 @@ process_exit (void)
      to the kernel-only page directory. */
   pd = cur->pagedir;
 
-#ifdef USERPROG
-    sema_up(&cur->sema_wait); // unblock for parent thread
-#endif
-
+  //printf("[JJS] in process_exit 2\n");
   if (pd != NULL) 
     {
       /* Correct ordering here is crucial.  We must set
@@ -170,11 +184,7 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-/* test code JJS */
-    list_remove(&(cur->child_elem)); // remove child_elem from parent->child list
-    intr_disable();
-    thread_block(); // block child thread
-    intr_enable();
+  //printf("[JJS] child name:[%s] status :[%s]\n", cur->name, cur->exit_status);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -287,11 +297,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  /* parse program_name from file_name */
+  //parse_file_name(file_name, &argv, &argc);
+  //program_name = file_name[0];
+  // parse program_name from file_name 
   ret_ptr = strtok_r(file_name, " ", next_ptr);
   program_name = ret_ptr;
 
-  /* make argv, argc from argument */
   while ( ret_ptr ){
 
 	argv[argc++] = ret_ptr;
@@ -300,8 +311,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   argv[argc] = NULL;
 
   /* Open executable file. */
-  //file = filesys_open (file_name);
+  //printf("[JJS] in load1 program_name : %s\n", program_name);
   file = filesys_open (program_name);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", program_name);
@@ -320,6 +332,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       printf ("load: %s: error loading executable\n", file_name);
       goto done; 
     }
+  //printf("[JJS] in load2\n");
 
   /* Read program headers. */
   file_ofset = ehdr.e_phoff;
@@ -379,6 +392,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
           break;
         }
     }
+  
+  //printf("[JJS] in load3\n");
 
   /* Set up stack. */
   if (!setup_stack (esp))
@@ -421,9 +436,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
   *eip = (void (*) (void)) ehdr.e_entry;
   success = true;
 
+  //printf("[JJS] in load4\n");
   /* use hex_dump() for debugging  */
   //hex_dump((int)(*esp),*esp,(unsigned int)PHYS_BASE - (unsigned int)(*esp),true);
 
+  //printf("[JJS] 4 in load thread's exit_status:[%d]\n", t->exit_status);
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
@@ -576,4 +593,21 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (th->pagedir, upage) == NULL
           && pagedir_set_page (th->pagedir, upage, kpage, writable));
+}
+
+void 
+parse_file_name(char *file_name, char **argv, int *argc)
+{
+  char *ret_ptr, *next_ptr;
+
+  ret_ptr = strtok_r(file_name, " ", next_ptr);
+
+  // make argv, argc from argument 
+  while ( ret_ptr ){
+
+    argv[(*argc)++] = ret_ptr;
+    ret_ptr = strtok_r(NULL, " ", next_ptr);
+  }
+  
+
 }

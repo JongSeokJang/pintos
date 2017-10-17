@@ -13,6 +13,7 @@
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "userprog/pagedir.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -209,34 +210,6 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
-// JJS
-/*
-  struct thread *p = thread_current();
-  
-  if( t == initial_thread )
-	t->parent = NULL;
-  else{
-	t->parent = p;
-    list_push_back(&(p->child),&(t->child_elem));
-  }
-  list_init(&(p->child));
-  sema_init(&t->sema_wait,0);
-  t->exit_status = 1;
-  t->already_wait = 1;
-*/
-
-// test code JJS
-#ifdef USERPROG
-    struct thread *p = thread_current();
-
-    t->parent = p;
-    list_init(&(p->child));
-    sema_init(&t->sema_wait,0);
-    list_push_back(&(p->child),&(t->child_elem));
-    t->exit_status = 1;
-    t->already_wait = 1;
-#endif
-
   return tid;
 }
 
@@ -318,6 +291,7 @@ thread_exit (void)
 {
   ASSERT (!intr_context ());
 
+  struct thread *test = thread_current();
 #ifdef USERPROG
   process_exit ();
 #endif
@@ -325,9 +299,24 @@ thread_exit (void)
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
+
   intr_disable ();
   list_remove (&thread_current()->allelem);
-  thread_current ()->status = THREAD_DYING;
+
+  // JJS
+  
+  struct thread *cur = thread_current();
+  if( cur != initial_thread ){	
+	list_remove(&cur->child_elem);
+
+	if( cur->pwait_flag ){
+	  cur->parent->wait_flag = false;
+	}
+  }
+  sema_up(&cur->sema); 
+  // JJS end
+  sema_down(&cur->die_sema);
+  thread_current()->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
 }
@@ -500,21 +489,23 @@ init_thread (struct thread *t, const char *name, int priority)
   list_push_back (&all_list, &t->allelem);
 
   // JJS
-/*
-  struct thread *p = running_thread();
-
-  if( t == initial_thread ) 
+  struct thread *p = running_thread(); // parent thread
+  if( t == p ) 
 	t -> parent = NULL;
   else{
 	t -> parent = p;
-	list_push_back( &p->child, &t->child_elem );
+	list_push_back( &p->child_list, &t->child_elem );
   }
+  
+  sema_init(&t->sema,0);
+  sema_init(&t->die_sema,0);
 
-  list_init(&(p->child));
-  sema_init(&t->sema_wait,0);
+  list_init( &t->child_list );
   t->exit_status = 1;
-  t->already_wait = 1;
-*/
+  t->wait_flag	 = false;
+  t->pwait_flag  = false;
+
+  // end JJS
 
 }
 

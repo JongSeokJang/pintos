@@ -103,12 +103,15 @@ struct thread
 
 	// JJS
 	/* For project#1 */
-	int exit_status;						/* Child thread's status after exit. */
-    struct thread* parent;
-	struct list child;
-	struct list_elem child_elem;
-	struct semaphore sema_wait;
-	int already_wait;	
+	int	   exit_status;					/* Child thread's status after exit. */
+    struct thread* parent;				/* thread's parent */
+	struct list child_list;				/* Child's List */
+	struct list_elem child_elem;		/* Child's List element */
+  
+	bool   wait_flag;					/* wait_flag */
+	bool   pwait_flag;					/* wait_flag for parent is waiting */
+	struct semaphore sema;
+	struct semaphore die_sema;
 
   };
 

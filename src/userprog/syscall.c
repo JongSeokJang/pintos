@@ -25,9 +25,8 @@ syscall_handler (struct intr_frame *f UNUSED)
 {
 
   void *syscall_num = (f->esp);
-  void *arg1, *arg2, *arg3;
+  void *arg1, *arg2, *arg3, *arg4;
   check_memory_valid(syscall_num+3);
-  
   switch( *(int*)syscall_num ){
 	case SYS_HALT:
 	  halt();
@@ -43,9 +42,9 @@ syscall_handler (struct intr_frame *f UNUSED)
 	case SYS_EXEC:
 	  arg1 = f->esp + 4*1;
 	  check_memory_valid(arg1+3);
-
-	  // pid_t exec(const char *cmd_line)
-	  f->eax = (uint32_t)exec( (char *)arg1 );
+	  
+	  //f->eax = (uint32_t)exec( (char *)arg1 );
+	  f->eax = (uint32_t)exec( (char *)*(int*)arg1 );
 
 	  break;
 	case SYS_WAIT:
@@ -76,8 +75,20 @@ syscall_handler (struct intr_frame *f UNUSED)
 
 	  break;
 	case SYS_FIBO:
+	  arg1 = f->esp + 4*1;
+	  check_memory_valid(arg1+3);
+
+	  f->eax = fibonacci( *(int *)arg1 );
 	  break;
 	case SYS_SUMINT:
+	  arg1 = f->esp + 4*1;
+	  arg2 = f->esp + 4*2;
+	  arg3 = f->esp + 4*3;
+	  arg4 = f->esp + 4*4;
+	  check_memory_valid(arg4+3);
+
+	  f->eax = sum_of_four_integers( *(int *)arg1, *(int *)arg2, 
+									 *(int *)arg3, *(int *)arg4);
 	  break;
 
 	default:
@@ -98,6 +109,8 @@ exit (int status)
 
   struct thread *cthread = thread_current();
   cthread->exit_status = status;
+  
+  //printf("[JJS] in exit : name : [%s] status :[%d][%d]\n", cthread->name,cthread->exit_status,status);
 
   char cthread_name[16+1];
   int ii = 0;
@@ -112,6 +125,15 @@ exit (int status)
   cthread->name[ii] = '\0';
 
   printf("%s: exit(%d)\n", cthread_name, cthread->exit_status); 
+  // JJS
+/*
+  if(cthread->parent != NULL) {
+	if(status >= 0) 
+	  cthread->parent->exit_flag = true;
+  }
+*/
+  // JJS end
+
   thread_exit();
 
 }
@@ -119,6 +141,7 @@ exit (int status)
 pid_t 
 exec (const char *cmd_line)
 {
+  //printf("[JJS] In systemcall exec %s\n", cmd_line);
   return process_execute(cmd_line);
 }
 
@@ -131,21 +154,21 @@ wait (pid_t pid)
 int
 read (int fd, void *buffer, unsigned size)
 {
-  int i;
+  int ii;
   char temp;
 
   if ( fd == 0 ){
 
-	for ( i = 0; i< size; i++){
+	for ( ii = 0; ii< size; ii++){
 	  temp = input_getc();
-	  *((char*)(buffer+i)) = temp;
+	  *(unsigned char*)(buffer+ii) = temp;
 
 	  if ( temp == '\0' || temp == '\n'){
-		*((char*)(buffer+i)) = '\0';
+		*((char*)(buffer+ii)) = '\0';
 		break;		  
 	  }
-	}	
-	return i;
+	}
+	return ii;
   }  
   else{
 	return -1;

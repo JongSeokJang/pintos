@@ -130,12 +130,13 @@ main (void)
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */
-  
   run_actions (argv);
 
+  //printf("[JJS] main 1\n");
   /* Finish up. */
   shutdown ();
   thread_exit ();
+  //printf("[JJS] main 2\n");
 }
 
 /* Clear the "BSS", a segment that should be initialized to
