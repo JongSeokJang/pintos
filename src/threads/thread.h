@@ -108,8 +108,6 @@ struct thread
 	struct list child_list;				/* Child's List */
 	struct list_elem child_elem;		/* Child's List element */
   
-	bool   wait_flag;					/* wait_flag */
-	bool   pwait_flag;					/* wait_flag for parent is waiting */
 	struct semaphore sema;
 	struct semaphore die_sema;
 

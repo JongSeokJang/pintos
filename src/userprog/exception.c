@@ -146,7 +146,7 @@ page_fault (struct intr_frame *f)
   /* JJS */
   if ( user == false )
 	exit(-1);
-  //exit(-1);
+
 
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;

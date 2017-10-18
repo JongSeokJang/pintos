@@ -291,7 +291,6 @@ thread_exit (void)
 {
   ASSERT (!intr_context ());
 
-  struct thread *test = thread_current();
 #ifdef USERPROG
   process_exit ();
 #endif
@@ -304,18 +303,15 @@ thread_exit (void)
   list_remove (&thread_current()->allelem);
 
   // JJS
-  
   struct thread *cur = thread_current();
-  if( cur != initial_thread ){	
+
+  if( cur != initial_thread )
 	list_remove(&cur->child_elem);
 
-	if( cur->pwait_flag ){
-	  cur->parent->wait_flag = false;
-	}
-  }
   sema_up(&cur->sema); 
-  // JJS end
   sema_down(&cur->die_sema);
+  // JJS end
+
   thread_current()->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
@@ -502,9 +498,6 @@ init_thread (struct thread *t, const char *name, int priority)
 
   list_init( &t->child_list );
   t->exit_status = 1;
-  t->wait_flag	 = false;
-  t->pwait_flag  = false;
-
   // end JJS
 
 }
