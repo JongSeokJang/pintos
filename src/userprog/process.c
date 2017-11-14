@@ -34,6 +34,7 @@ process_execute (const char *file_name)
   int ii;
   char program_name[16+1];
   struct file *file_ds;
+  struct thread *cur = thread_current();
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -52,8 +53,10 @@ process_execute (const char *file_name)
   program_name[ii] = '\0';
 
   file_ds = filesys_open(program_name);
-  if ( file_ds == NULL )
+
+  if ( file_ds == NULL ) {
 	return -1;
+  }
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -70,6 +73,7 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  struct thread *cur = thread_current();
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -80,10 +84,15 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
+
+//test!
+
   if (!success){
     thread_exit ();
 
   }
+ 
+   
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -136,6 +145,7 @@ process_wait (tid_t child_tid UNUSED)
 										// in thread_exit sema_up(&child->sema)
 										// sema_down(&child->die_sema) 
 										// for setting exit_status
+  
   exit_status = child->exit_status;		// set exit_status from child->exit_status.
   sema_up(&child->die_sema);			// parent up.
 
@@ -168,6 +178,8 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  //sema_up(&cur->sema); 
+  //sema_down(&cur->die_sema);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -270,10 +282,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
   int i;
 
   char *program_name;
-  char *ret_ptr, *next_ptr;
+  char *ret_ptr , *next_ptr[0];
   char *argv[128+1];
   int	argc = 0;
-  
+  int	fd;
+  int	ii;
+
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -281,25 +295,32 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   // parse program_name from file_name 
-  ret_ptr = strtok_r(file_name, " ", next_ptr);
+  ret_ptr = strtok_r(file_name, " ", &next_ptr);
   program_name = ret_ptr;
 
   // make argc, argv
   while ( ret_ptr ){
 
 	argv[argc++] = ret_ptr;
-	ret_ptr = strtok_r(NULL, " ", next_ptr);
+	ret_ptr = strtok_r(NULL, " ", &next_ptr);
   }
   argv[argc] = NULL;
 
-  /* Open executable file. */
-  file = filesys_open (program_name);
+  fd = open (program_name);
+  for( ii = 0 ; ii <128; ii++){
+	if( t->of_info[ii].fd == fd ) {
+	  file = t->of_info[ii].fp;
+	  break;
+	}
+  }
 
+  
   if (file == NULL) 
-    {
+  {
       printf ("load: %s: open failed\n", program_name);
       goto done; 
-    }
+  }
+  file_deny_write(file);	
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -420,7 +441,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+
+  //file_close (file);
   return success;
 }
 

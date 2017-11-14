@@ -5,17 +5,17 @@
 
 int main(int argc, char **argv)
 {
-    int a,b,c,d,sum,pibo;
+    int a,b,c,d,sum,fibo;
 
     a = atoi(argv[1]); 
 	b = atoi(argv[2]); 
 	c = atoi(argv[3]); 
 	d = atoi(argv[4]);
 
-    pibo = fibonacci(a);
+    fibo = fibonacci(a);
     sum = sum_of_four_integers(a,b,c,d);
 
-    printf("%d %d\n",pibo,sum);
+    printf("%d %d\n",fibo,sum);
 
     return 1;
 }

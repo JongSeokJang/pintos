@@ -7,7 +7,13 @@
 #include "threads/vaddr.h"
 #include "devices/shutdown.h"
 #include "devices/input.h"
+#include "filesys/off_t.h"
+#include "filesys/filesys.h"
+#include "threads/synch.h"
 
+#define FILE_MAX 128
+struct semaphore sema_write;
+struct semaphore sema_read;
 
 static void syscall_handler (struct intr_frame *);
 void check_memory_valid(void *addr);
@@ -91,7 +97,53 @@ syscall_handler (struct intr_frame *f UNUSED)
 	  f->eax = sum_of_four_integers( *(int *)arg1, *(int *)arg2, 
 									 *(int *)arg3, *(int *)arg4);
 	  break;
+	case SYS_CREATE:
+	  arg1 = f->esp + 4*1;
+	  arg2 = f->esp + 4*2;
+	  check_memory_valid(arg2+3);
+	
+	  // maybe chagne
+	  f->eax = create((char *)*(int*)arg1, *(unsigned int*)arg2 );
+	  break;
+	case SYS_REMOVE:
+	  arg1 = f->esp + 4*1;
+	  check_memory_valid(arg1+3);
+	  
+	  f->eax = remove( (char *)*(int*)arg1 );
+	  break;
+	case SYS_OPEN:
+	  arg1 = f->esp + 4*1;
+	  check_memory_valid(arg1+3);
 
+	  f->eax = open( (char *)*(int*)arg1);
+	  break;
+	case SYS_CLOSE:
+	  arg1 = f->esp + 4*1;
+	  check_memory_valid(arg1+3);
+	  
+	  close( *(int*)arg1 );
+	  break;
+	case SYS_FILESIZE:
+	  arg1 = f->esp + 4*1;
+	  check_memory_valid(arg1+3);
+	  
+	  f->eax = filesize( *(int*)arg1 );
+	  break;
+	case SYS_TELL:
+	  arg1 = f->esp + 4*1;
+	  check_memory_valid(arg1+3);
+	  
+	  f->eax = tell( *(int*)arg1 );
+	  break;
+	case SYS_SEEK:
+	  arg1 = f->esp + 4*1;
+	  arg2 = f->esp + 4*2;
+	  check_memory_valid(arg2+3);
+
+	  // maybe change
+	  seek( *(int*)arg1, *(unsigned*)arg2 );
+	  break;
+	  
 	default:
 	  break;
   }
@@ -107,25 +159,28 @@ halt (void)
 void  
 exit (int status)
 {
+  struct thread *cur = thread_current();
+  cur->exit_status = status;
 
-  struct thread *cthread = thread_current();
-  cthread->exit_status = status;
-  
-
-  char cthread_name[16+1];
+  char cur_name[16+1];
   int ii = 0;
   
-  memset(cthread_name, 0x00, sizeof(cthread_name));
-  for( ii = 0; ii< strlen(cthread->name); ii++ ){
-	if( cthread->name[ii] == '\0' || cthread->name[ii] == ' '){
+  memset(cur_name, 0x00, sizeof(cur_name) );
+  for( ii = 0; ii < strlen(cur->name); ii++ ){
+	if( cur->name[ii] == '\0' || cur->name[ii] == ' ')
 	  break;
-	}
-	cthread_name[ii] = cthread->name[ii];
+	cur_name[ii] = cur->name[ii];
   }
-  cthread->name[ii] = '\0';
+  cur_name[ii] = '\0';
 
-  printf("%s: exit(%d)\n", cthread_name, cthread->exit_status); 
 
+  for( ii = 0; ii < FILE_MAX; ii++){
+	if( cur->of_info[ii].fp != NULL )
+	  close( cur->of_info[ii].fd);
+		
+  }
+
+  printf("%s: exit(%d)\n", cur_name, cur->exit_status); 
   thread_exit();
 
 }
@@ -145,35 +200,71 @@ wait (pid_t pid)
 int
 read (int fd, void *buffer, unsigned size)
 {
+  int result;
   int ii;
   char temp;
+  struct thread *cur = thread_current();
+  
+  if( !is_user_vaddr(buffer) || !is_user_vaddr(buffer+size-1) )
+	exit(-1);
 
-  if ( fd == 0 ){
+  switch(fd){
+	case 0:			// fd_read
+	  for ( ii = 0; ii< size; ii++){
+		temp = input_getc();
+		*(unsigned char*)(buffer+ii) = temp;
 
-	for ( ii = 0; ii< size; ii++){
-	  temp = input_getc();
-	  *(unsigned char*)(buffer+ii) = temp;
-
-	  if ( temp == '\0' || temp == '\n'){
-		*((char*)(buffer+ii)) = '\0';
-		break;		  
+		if ( temp == '\0' || temp == '\n'){
+		  *((char*)(buffer+ii)) = '\0';
+		  break;		  
+		}
 	  }
-	}
-	return ii;
-  }  
-  else{
-	return -1;
+	  return ii;
+	case 1:			// fd_write
+	case 2:			// fd_error
+	  return -1;	
+	case 3:
+	default:
+	  lock_acquire(&filesys_lock);
+	  for( ii = 0 ; ii < FILE_MAX; ii++){
+		if( cur->of_info[ii].fd == fd ){
+		  result = file_read(cur->of_info[ii].fp, buffer, size);
+		  lock_release(&filesys_lock);
+		  return result;
+		}
+	  }
+	  lock_release(&filesys_lock);
+	  exit(-1); 
   }
 }
 
 int 
 write (int fd, const void *buffer, unsigned size)
 {
-  if( fd == 1 ){
-	putbuf(buffer, size);
-	return size;
+  int ii;
+  int result;
+  struct thread *cur = thread_current();
+  switch(fd){
+	case 2:
+	case 0:			// fd_read
+	  return -1; 
+	case 1:
+	  putbuf(buffer, size);
+	  return size;
+	case 3:
+	default:
+	  lock_acquire(&filesys_lock);
+	  for(ii = 0; ii < FILE_MAX; ii++){
+		if( cur->of_info[ii].fd == fd ){
+		  result = file_write(cur->of_info[ii].fp, buffer, size);
+		  lock_release(&filesys_lock);
+		  return result;
+		}
+	  }
+	  lock_release(&filesys_lock);
+	  exit(-1);
   }
-  return -1;
+
 }
 
 int 
@@ -201,10 +292,138 @@ sum_of_four_integers (int a, int b, int c, int d)
 }
 
 void
-check_memory_valid(void *addr)
+check_memory_valid (void *addr)
 {
   if( addr < 0x08048000 || addr >= PHYS_BASE ){
 	exit(-1);
   }
 }
+
+bool    
+create (const char *file, unsigned init_size)
+{
+  if( file == NULL)
+	//return -1;
+	exit(-1);
+  return filesys_create(file, init_size);  
+}
+
+bool    
+remove (const char *file)
+{
+  if( file == NULL)
+	//return -1;
+	exit(-1);
+  return filesys_remove(file); 
+}
+
+int     
+open (const char *file)
+{
+  static fd = 2;
+  int ii;
+  struct file *fp;
+  struct thread *cur = thread_current();
+
+  fd++;  
+
+  if( file == NULL) {
+	return -1;
+  }
+
+  lock_acquire(&filesys_lock);
+  fp = filesys_open(file);
+  lock_release(&filesys_lock);
+
+  if( fp == NULL){
+	return -1;
+  }
+
+  else{
+	for( ii = 0; ii < FILE_MAX; ii++){
+
+	  if( cur->of_info[ii].fp == NULL ){
+		cur->of_info[ii].fp = fp;
+		cur->of_info[ii].fd = fd;
+		return fd;
+	  }
+	}
+	return -1;
+  }
+}
+
+int     
+filesize (int fd)
+{
+  int ii;
+  struct thread *cur = thread_current();
+
+  for( ii = 0 ; ii < FILE_MAX; ii++){
+
+	if( cur->of_info[ii].fd == fd ){
+	  if( cur->of_info[ii].fp == NULL)
+		//return -1;
+		exit(-1);
+	  
+	  return file_length(cur->of_info[ii].fp);
+	}
+  }
+}
+
+void    
+seek (int fd,unsigned position){
+  
+  int ii;
+  struct thread *cur = thread_current();
+
+  for( ii = 0; ii < FILE_MAX; ii++){
+	if( cur->of_info[ii].fd == fd ){
+	  if( cur->of_info[ii].fp == NULL)
+		//return -1;
+		exit(-1);
+	  
+	  file_seek(cur->of_info[ii].fp, position);
+	}
+  }
+}
+
+unsigned 
+tell (int fd){
+
+  int ii;
+  struct thread *cur = thread_current();
+
+  for( ii = 0; ii < FILE_MAX; ii++){
+	if( cur->of_info[ii].fd == fd ){
+	  if( cur->of_info[ii].fp == NULL)
+		//return -1;
+		exit(-1);
+	  
+	  return file_tell(cur->of_info[ii].fp);
+	}
+  }
+
+}
+
+void    
+close (int fd){
+
+  int ii;
+  struct file* fp;
+  struct thread *cur = thread_current();
+
+  for( ii = 0; ii < FILE_MAX; ii++){
+	if( cur->of_info[ii].fd == fd ){
+	  if( cur->of_info[ii].fp == NULL)
+		//return -1;
+		exit(-1);
+	  
+	  fp = cur->of_info[ii].fp;
+	  cur->of_info[ii].fp = NULL;
+	  file_close(fp);
+	  
+	}
+  }
+}
+
 

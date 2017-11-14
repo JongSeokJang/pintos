@@ -81,8 +81,14 @@ typedef int tid_t;
    only because they are mutually exclusive: only a thread in the
    ready state is on the run queue, whereas only a thread in the
    blocked state is on a semaphore wait list. */
+
+struct file_oinfo{
+  struct file * fp;
+  int fd;
+};
+
 struct thread
-  {
+{
     /* Owned by thread.c. */
     tid_t tid;                          /* Thread identifier. */
     enum thread_status status;          /* Thread state. */
@@ -110,8 +116,12 @@ struct thread
   
 	struct semaphore sema;
 	struct semaphore die_sema;
+	struct semaphore sema_zombie;
+	struct semaphore sema_exec;
 
-  };
+	struct file_oinfo of_info[128];
+
+};
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.

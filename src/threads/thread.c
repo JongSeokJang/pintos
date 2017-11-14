@@ -495,10 +495,16 @@ init_thread (struct thread *t, const char *name, int priority)
   
   sema_init(&t->sema,0);
   sema_init(&t->die_sema,0);
+  sema_init(&t->sema_zombie,0);
+  sema_init(&t->sema_exec,0);
 
   list_init( &t->child_list );
   t->exit_status = 1;
-  // end JJS
+  
+  int ii;
+  for( ii = 0 ; ii < 128; ii++){
+	t->of_info[ii].fp = NULL;
+  }
 
 }
 
